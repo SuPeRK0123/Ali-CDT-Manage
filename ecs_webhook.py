@@ -354,10 +354,69 @@ def tg_command_listener():
             logger.error(f"TG监听异常: {e}")
             time.sleep(10)
 
-# ================== 启动服务 ==================
+# ================== Telegram 交互式控制（后台线程） ==================
+def tg_command_listener():
+    """长轮询 Telegram 更新，处理 /start /stop /status /cdt"""
+    offset = 0
+    logger.info("Telegram 交互式控制已启动")
+    while True:
+        try:
+            url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates"
+            resp = tg_requests.get(url, params={"offset": offset, "timeout": 20}, timeout=25)
+            if resp.status_code != 200:
+                time.sleep(5)
+                continue
+
+            updates = resp.json().get('result', [])
+            for update in updates:
+                offset = update['update_id'] + 1
+                message = update.get('message')
+                if not message:
+                    continue
+                chat_id = message.get('chat', {}).get('id')
+                text = message.get('text', '').strip()
+
+                if not text.startswith('/'):
+                    continue
+
+                if text == '/start':
+                    with PIDLock():
+                        auto_start_with_check(chat_id)
+                elif text == '/stop':
+                    success, msg = stop_instance()
+                    send_tg_message(f"🛑 关机指令\n结果: {'成功' if success else '失败'}\n信息: {msg}", chat_id)
+                elif text == '/status':
+                    status = get_instance_status()
+                    traffic = query_cdt_traffic()
+                    msg = (f"📊 实例状态\nID: {ECS_INSTANCE_ID}\n状态: {status or '未知'}\n"
+                           f"CDT流量: {traffic:.2f} GB / {CDT_LIMIT_GB} GB" if traffic else "CDT查询失败")
+                    send_tg_message(msg, chat_id)
+                elif text == '/cdt':
+                    traffic = query_cdt_traffic()
+                    msg = f"📊 当前CDT流量: {traffic:.2f} GB / {CDT_LIMIT_GB} GB" if traffic else "查询失败"
+                    send_tg_message(msg, chat_id)
+                elif text == '/help':
+                    help_text = (
+                        "🤖 可用命令：\n"
+                        "/start - 手动开机\n"
+                        "/stop - 手动关机（节省停机）\n"
+                        "/status - 查询实例状态+CDT\n"
+                        "/cdt - 仅查询CDT流量\n"
+                        "/help - 显示帮助"
+                    )
+                    send_tg_message(help_text, chat_id)
+                else:
+                    send_tg_message(f"未知命令: {text}\n发送 /help 查看帮助", chat_id)
+
+        except Exception as e:
+            logger.error(f"TG监听异常: {e}")
+            time.sleep(10)
+
+
+# ================== 启动 TG 监听线程（Gunicorn 兼容） ==================
+tg_thread = threading.Thread(target=tg_command_listener, daemon=True)
+tg_thread.start()
+
+# ================== 启动服务（仅直接运行时生效） ==================
 if __name__ == '__main__':
-    # 启动 TG 监听线程
-    tg_thread = threading.Thread(target=tg_command_listener, daemon=True)
-    tg_thread.start()
-    # 启动 Flask
     app.run(host='0.0.0.0', port=WEBHOOK_PORT, debug=False)
