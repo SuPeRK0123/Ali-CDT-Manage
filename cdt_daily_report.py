@@ -5,6 +5,7 @@ import json
 import logging
 import sys
 import time
+import os
 from datetime import datetime
 import requests as tg_requests
 from aliyunsdkcore.client import AcsClient
@@ -100,5 +101,4 @@ def main():
         f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | {traffic:.2f}GB | {pct:.1f}% | 余额:{balance}\n")
 
 if __name__ == '__main__':
-    import os
     main()
