@@ -95,7 +95,12 @@ def send_tg_message(message, chat_id=None):
     if chat_id is None:
         chat_id = TG_CHAT_ID
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-    payload = {...}
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
     try:
         tg_requests.post(url, json=payload, timeout=10)
         logger.info("Telegram 通知已发送")
@@ -378,7 +383,6 @@ def health():
 def tg_command_listener():
     """长轮询 Telegram 更新，处理 /start /stop /status /cdt"""
     offset = 0
-    retry_count = 0
     logger.info("Telegram 交互式控制已启动")
     while True:
         try:
@@ -392,7 +396,6 @@ def tg_command_listener():
             if resp.status_code != 200:
                 logger.warning(f"Telegram API 返回状态码 {resp.status_code}，等待后重试")
                 time.sleep(5)
-                retry_count = 0
                 continue
 
             updates = resp.json().get('result', [])
