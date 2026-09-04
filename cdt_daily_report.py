@@ -49,12 +49,17 @@ def query_cdt():
 
 def get_public_ip():
     try:
-        req = DescribeInstancesRequest.DescribeInstancesRequest(); req.set_InstanceIds([ECS_INSTANCE_ID])
+        req = DescribeInstancesRequest.DescribeInstancesRequest()
+        req.set_InstanceIds([ECS_INSTANCE_ID])
         resp = client.do_action_with_exception(req)
-        inst = json.loads(resp.decode('utf-8')).get('Instances', {}).get('Instance', [])[0]
+        instances = json.loads(resp.decode('utf-8')).get('Instances', {}).get('Instance', [])
+        if not instances:
+            return "无实例"
+        inst = instances[0]
         return inst.get('EipAddress', {}).get('IpAddress') or inst.get('PublicIpAddress', {}).get('IpAddress', ['无'])[0]
     except Exception as e:
-        logger.error(f"IP查询失败: {e}"); return "获取失败"
+        logger.error(f"IP查询失败: {e}")
+        return "获取失败"
 
 def get_balance():
     """查询账户可用余额（含现金+信控）"""
