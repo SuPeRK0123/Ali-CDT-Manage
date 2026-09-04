@@ -95,24 +95,19 @@ def send_tg_message(message, chat_id=None):
     if chat_id is None:
         chat_id = TG_CHAT_ID
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
-    }
-    # 重试机制：最多尝试2次，间隔2秒
-    for attempt in range(2):
+    payload = {...}
+    try:
+        tg_requests.post(url, json=payload, timeout=10)
+        logger.info("Telegram 通知已发送")
+        return
+    except Exception as e:
+        logger.warning(f"发送TG消息失败，2秒后重试: {e}")
+        time.sleep(2)
         try:
             tg_requests.post(url, json=payload, timeout=10)
-            logger.info("Telegram 通知已发送")
-            return
-        except Exception as e:
-            if attempt == 0:
-                logger.warning(f"发送TG消息失败，2秒后重试: {e}")
-                time.sleep(2)
-            else:
-                logger.error(f"发送TG消息失败（重试后仍失败）: {e}")
+            logger.info("Telegram 通知已发送（重试成功）")
+        except Exception as e2:
+            logger.error(f"发送TG消息失败（重试后仍失败）: {e2}")
 
 # ================== CDT 流量查询 ==================
 def query_cdt_traffic():
@@ -491,9 +486,6 @@ def tg_command_listener():
                     send_tg_message(help_text, chat_id)
                 else:
                     send_tg_message(f"未知命令: {text}\n发送 /help 查看帮助", chat_id)
-
-            # 成功后重置重试计数
-            retry_count = 0
 
         except tg_requests.exceptions.Timeout:
             # 超时错误：使用指数退避，计数静态维护（使用闭包变量）
