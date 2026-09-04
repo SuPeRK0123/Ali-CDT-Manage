@@ -487,7 +487,7 @@ def tg_command_listener():
             # 成功后重置重试计数
             retry_count = 0
 
-        except requests.exceptions.Timeout:
+        except tg_requests.exceptions.Timeout:
             retry_count += 1
             wait = min(60, 2 ** retry_count)  # 指数退避，最大60秒
             logger.warning(f"Telegram API 超时，{wait}秒后重试 (尝试 {retry_count})")
