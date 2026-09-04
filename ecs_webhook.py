@@ -213,13 +213,23 @@ def auto_start_with_check(chat_id=None):
 
 # ================== Webhook 事件处理 ==================
 def handle_state_change(event_data):
+    # 兼容两种结构：有 content 或直接是状态字段
     content = event_data.get('content', {})
-    instance_id = content.get('resourceId')
-    new_state = content.get('state')
+    instance_id = content.get('resourceId') or event_data.get('resourceId')
+    new_state = content.get('state') or event_data.get('state')
+
+    if not instance_id or not new_state:
+        logger.warning("事件缺少 resourceId 或 state，忽略")
+        return
+
+    logger.info(f"收到事件: 实例 {instance_id} -> {new_state}")
 
     if instance_id != ECS_INSTANCE_ID:
+        logger.info("忽略其他实例")
         return
+
     if new_state != 'Stopped':
+        logger.info(f"状态为 {new_state}，不触发开机")
         return
 
     # 使用文件锁防止重复
@@ -240,18 +250,21 @@ def webhook():
         if not data:
             return jsonify({"code": 0, "msg": "ok"}), 200
 
+        logger.info(f"收到原始事件: {json.dumps(data, ensure_ascii=False)[:300]}")
+
+        # 提取事件数据
         if 'source' in data and data.get('source') == 'acs.ecs':
             event_data = data.get('data', {})
-            if 'content' in event_data:
-                handle_state_change(event_data)
-            else:
-                handle_state_change(data)
+            # 直接处理 event_data，无论有无 content
+            handle_state_change(event_data)
         else:
+            # 兼容其他来源
             handle_state_change(data)
 
         return jsonify({"code": 0, "msg": "ok"}), 200
+
     except Exception as e:
-        logger.error(f"Webhook异常: {e}")
+        logger.error(f"Webhook处理异常: {e}")
         return jsonify({"code": 500, "msg": str(e)}), 500
 
 # ================== 手动控制 API ==================
