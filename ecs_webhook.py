@@ -94,18 +94,25 @@ class PIDLock:
 def send_tg_message(message, chat_id=None):
     if chat_id is None:
         chat_id = TG_CHAT_ID
-    try:
-        url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True
-        }
-        tg_requests.post(url, json=payload, timeout=10)
-        logger.info("Telegram 通知已发送")
-    except Exception as e:
-        logger.error(f"发送TG消息失败: {e}")
+    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
+    # 重试机制：最多尝试2次，间隔2秒
+    for attempt in range(2):
+        try:
+            tg_requests.post(url, json=payload, timeout=10)
+            logger.info("Telegram 通知已发送")
+            return
+        except Exception as e:
+            if attempt == 0:
+                logger.warning(f"发送TG消息失败，2秒后重试: {e}")
+                time.sleep(2)
+            else:
+                logger.error(f"发送TG消息失败（重试后仍失败）: {e}")
 
 # ================== CDT 流量查询 ==================
 def query_cdt_traffic():
@@ -186,12 +193,13 @@ def get_system_disk_size():
         request.set_action_name('DescribeDisks')
         request.set_method('POST')
         request.add_query_param('InstanceId', ECS_INSTANCE_ID)
-        request.add_query_param('DiskType', 'system')  # 只查系统盘
+        request.add_query_param('DiskType', 'system')
+        request.add_query_param('PageSize', 1)  # 只返回1条记录，节省资源
         response = client.do_action_with_exception(request)
         data = json.loads(response.decode('utf-8'))
         disks = data.get('Disks', {}).get('Disk', [])
         if disks:
-            return disks[0].get('Size')  # 单位 GB
+            return disks[0].get('Size')
         return None
     except Exception as e:
         logger.error(f"查询磁盘大小失败: {e}")
@@ -488,15 +496,17 @@ def tg_command_listener():
             retry_count = 0
 
         except tg_requests.exceptions.Timeout:
-            retry_count += 1
-            wait = min(60, 2 ** retry_count)  # 指数退避，最大60秒
-            logger.warning(f"Telegram API 超时，{wait}秒后重试 (尝试 {retry_count})")
+            # 超时错误：使用指数退避，计数静态维护（使用闭包变量）
+            if not hasattr(tg_command_listener, "timeout_retries"):
+                tg_command_listener.timeout_retries = 0
+            tg_command_listener.timeout_retries += 1
+            wait = min(60, 2 ** tg_command_listener.timeout_retries)
+            logger.warning(f"Telegram API 超时，{wait}秒后重试 (尝试 {tg_command_listener.timeout_retries})")
             time.sleep(wait)
         except Exception as e:
             logger.error(f"TG监听异常: {e}")
-            retry_count += 1
-            wait = min(60, 2 ** retry_count)
-            time.sleep(wait)
+            # 对于其他异常，固定等待10秒后继续
+            time.sleep(10)
 
 # ================== 启动 TG 监听线程（Gunicorn 兼容） ==================
 tg_thread = threading.Thread(target=tg_command_listener, daemon=True)
