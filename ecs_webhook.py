@@ -162,7 +162,17 @@ def start_instance_with_retry():
                 return True, "Starting in progress"
 
         except Exception as e:
-            logger.error(f"开机尝试 {attempt} 失败: {e}")
+            error_msg = str(e)
+            logger.error(f"开机尝试 {attempt} 失败: {error_msg}")
+            # 检查是否为实例已释放错误
+            if 'InvalidInstanceId.NotFound' in error_msg or 'InvalidInstanceId' in error_msg:
+                send_tg_message(
+                    f"🚨 <b>严重告警：实例已被释放</b>\n\n"
+                    f"🖥 实例: {ECS_INSTANCE_ID}\n"
+                    f"📌 无法启动，实例可能已被系统回收或手动释放。\n"
+                    f"⚠️ 请立即登录控制台确认并手动重建。"
+                )
+                return False, "Instance Released"
 
         if attempt < MAX_RETRIES:
             time.sleep(RETRY_INTERVAL)
@@ -299,13 +309,21 @@ def health():
 def tg_command_listener():
     """长轮询 Telegram 更新，处理 /start /stop /status /cdt"""
     offset = 0
+    retry_count = 0
     logger.info("Telegram 交互式控制已启动")
     while True:
         try:
             url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates"
-            resp = tg_requests.get(url, params={"offset": offset, "timeout": 20}, timeout=25)
+            # 增加超时参数，避免长时间阻塞
+            resp = tg_requests.get(
+                url,
+                params={"offset": offset, "timeout": 30},
+                timeout=35
+            )
             if resp.status_code != 200:
+                logger.warning(f"Telegram API 返回状态码 {resp.status_code}，等待后重试")
                 time.sleep(5)
+                retry_count = 0
                 continue
 
             updates = resp.json().get('result', [])
@@ -320,6 +338,7 @@ def tg_command_listener():
                 if not text.startswith('/'):
                     continue
 
+                # 处理命令（保持不变）
                 if text == '/start':
                     with PIDLock():
                         auto_start_with_check(chat_id)
@@ -349,9 +368,19 @@ def tg_command_listener():
                 else:
                     send_tg_message(f"未知命令: {text}\n发送 /help 查看帮助", chat_id)
 
+            # 成功后重置重试计数
+            retry_count = 0
+
+        except requests.exceptions.Timeout:
+            retry_count += 1
+            wait = min(60, 2 ** retry_count)  # 指数退避，最大60秒
+            logger.warning(f"Telegram API 超时，{wait}秒后重试 (尝试 {retry_count})")
+            time.sleep(wait)
         except Exception as e:
             logger.error(f"TG监听异常: {e}")
-            time.sleep(10)
+            retry_count += 1
+            wait = min(60, 2 ** retry_count)
+            time.sleep(wait)
 
 # ================== 启动 TG 监听线程（Gunicorn 兼容） ==================
 tg_thread = threading.Thread(target=tg_command_listener, daemon=True)
