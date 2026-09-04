@@ -212,6 +212,7 @@ def auto_start_with_check(chat_id=None):
     return success
 
 # ================== Webhook 事件处理 ==================
+
 def handle_state_change(event_data):
     # 兼容两种结构：有 content 或直接是状态字段
     content = event_data.get('content', {})
