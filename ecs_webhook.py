@@ -171,6 +171,11 @@ def get_instance_details():
         logger.error(f"查询实例详情失败: {e}")
         return None
 
+def get_instance_status():
+    """兼容旧调用，返回实例状态字符串"""
+    details = get_instance_details()
+    return details.get("status") if details else None
+
 # ================== 磁盘信息查询 ==================
 def get_system_disk_size():
     """查询系统盘大小（GB）"""
@@ -438,6 +443,7 @@ def tg_command_listener():
                     instance_name = details.get('instance_name') or '未命名'
 
                     # 构建消息
+                    cdt_line = f"📊 CDT流量: {traffic:.2f} GB / {CDT_LIMIT_GB} GB" if traffic else "📊 CDT查询失败"
                     msg = (
                         f"📊 <b>实例状态</b>\n\n"
                         f"🖥 名称: {instance_name}\n"
@@ -446,7 +452,7 @@ def tg_command_listener():
                         f"📦 规格: {details['instance_type']} ({details['cpu']} vCPU, {memory_gb:.1f} GB)\n"
                         f"💾 系统盘: {disk_text}\n"
                         f"🔗 弹性IP: {eip_text}\n"
-                        f"📊 CDT流量: {traffic:.2f} GB / {CDT_LIMIT_GB} GB" if traffic else "CDT查询失败"
+                        f"{cdt_line}"
                     )
 
                     # 如果是抢占式实例，显示自动释放时间
