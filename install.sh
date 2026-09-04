@@ -49,7 +49,7 @@ fi
 
 # 3. 安装 Python 依赖
 echo -e "${YELLOW}>>> 安装 Python 依赖...${NC}"
-pip3 install -q --break-system-packages flask aliyun-python-sdk-core aliyun-python-sdk-ecs aliyun-python-sdk-bssopenapi requests
+pip3 install -q --break-system-packages flask gunicorn aliyun-python-sdk-core aliyun-python-sdk-ecs aliyun-python-sdk-bssopenapi requests
 
 # 4. 收集配置信息
 echo -e "${YELLOW}>>> 请输入配置信息：${NC}"
