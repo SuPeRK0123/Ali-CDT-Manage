@@ -14,6 +14,7 @@ import time
 import fcntl
 import os
 import requests as tg_requests
+from datetime import datetime
 from flask import Flask, request, jsonify
 from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
@@ -123,7 +124,8 @@ def query_cdt_traffic():
         return None
 
 # ================== ECS 状态查询 ==================
-def get_instance_status():
+def get_instance_details():
+    """获取实例详细信息，包含状态、规格、CPU、内存、带宽、停机模式、计费方式、IP等"""
     try:
         request = DescribeInstancesRequest.DescribeInstancesRequest()
         request.set_InstanceIds([ECS_INSTANCE_ID])
@@ -132,16 +134,70 @@ def get_instance_status():
         instances = data.get('Instances', {}).get('Instance', [])
         if not instances:
             return None
-        return instances[0].get('Status')
+        inst = instances[0]
+
+        # 获取弹性公网IP信息
+        eip = inst.get('EipAddress', {})
+        eip_ip = eip.get('IpAddress') if eip else None
+        eip_bandwidth = eip.get('Bandwidth') if eip else None
+
+        # 获取公网IP（安全）
+        public_ip_obj = inst.get('PublicIpAddress', {})
+        public_ips = public_ip_obj.get('IpAddress', [])
+        public_ip = public_ips[0] if public_ips else None
+
+        # 获取IPv6（安全）
+        ipv6_set = inst.get('Ipv6Sets', {}).get('Ipv6Address', [])
+        ipv6 = ipv6_set[0] if ipv6_set else None
+
+        return {
+            "instance_name": inst.get("InstanceName"),
+            "status": inst.get("Status"),
+            "instance_type": inst.get("InstanceType"),
+            "cpu": inst.get("Cpu"),
+            "memory": inst.get("Memory"),
+            "os_name": inst.get("OSName"),
+            "stopped_mode": inst.get("StoppedMode"),
+            "bandwidth_out": inst.get("InternetMaxBandwidthOut"),
+            "eip_bandwidth": eip_bandwidth,
+            "charge_type": inst.get("InstanceChargeType"),
+            "public_ip": public_ip,
+            "eip": eip_ip,
+            "ipv6": ipv6,
+            "creation_time": inst.get("CreationTime"),
+            "auto_release_time": inst.get("AutoReleaseTime")
+        }
     except Exception as e:
-        logger.error(f"查询实例状态失败: {e}")
+        logger.error(f"查询实例详情失败: {e}")
+        return None
+
+# ================== 磁盘信息查询 ==================
+def get_system_disk_size():
+    """查询系统盘大小（GB）"""
+    try:
+        request = CommonRequest()
+        request.set_domain('ecs.aliyuncs.com')
+        request.set_version('2014-05-26')
+        request.set_action_name('DescribeDisks')
+        request.set_method('POST')
+        request.add_query_param('InstanceId', ECS_INSTANCE_ID)
+        request.add_query_param('DiskType', 'system')  # 只查系统盘
+        response = client.do_action_with_exception(request)
+        data = json.loads(response.decode('utf-8'))
+        disks = data.get('Disks', {}).get('Disk', [])
+        if disks:
+            return disks[0].get('Size')  # 单位 GB
+        return None
+    except Exception as e:
+        logger.error(f"查询磁盘大小失败: {e}")
         return None
 
 # ================== 开机（带重试） ==================
 def start_instance_with_retry():
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            status = get_instance_status()
+            details = get_instance_details()
+            status = details.get("status") if details else None
             if status == 'Running':
                 return True, "Already Running"
             if status == 'Starting':
@@ -292,7 +348,8 @@ def manual_stop():
 
 @app.route('/api/status', methods=['GET'])
 def manual_status():
-    status = get_instance_status()
+    details = get_instance_details()
+    status = details.get("status") if details else None
     traffic = query_cdt_traffic()
     return jsonify({
         "instance_id": ECS_INSTANCE_ID,
@@ -346,10 +403,59 @@ def tg_command_listener():
                     success, msg = stop_instance()
                     send_tg_message(f"🛑 关机指令\n结果: {'成功' if success else '失败'}\n信息: {msg}", chat_id)
                 elif text == '/status':
-                    status = get_instance_status()
+                    details = get_instance_details()
                     traffic = query_cdt_traffic()
-                    msg = (f"📊 实例状态\nID: {ECS_INSTANCE_ID}\n状态: {status or '未知'}\n"
-                           f"CDT流量: {traffic:.2f} GB / {CDT_LIMIT_GB} GB" if traffic else "CDT查询失败")
+                    if not details:
+                        send_tg_message("❌ 查询实例详情失败", chat_id)
+                        continue
+
+                    # 获取系统盘大小
+                    disk_size = get_system_disk_size()
+
+                    # 状态处理
+                    status_text = details['status'] or '未知'
+                    if details['status'] == 'Stopped' and details.get('stopped_mode'):
+                        status_text += f" ({details['stopped_mode']})"
+
+                    # 计费方式
+                    charge_map = {
+                        'PostPaid': '按量付费',
+                        'PrePaid': '包年包月',
+                        'Spot': '抢占式实例'
+                    }
+                    charge = charge_map.get(details.get('charge_type'), details.get('charge_type') or '未知')
+
+                    # 内存
+                    memory_gb = details['memory'] / 1024 if details.get('memory') else 0
+
+                    # 系统盘
+                    disk_text = f"{disk_size} GB" if disk_size else "查询失败"
+
+                    # 弹性公网IP
+                    eip_text = details.get('eip') or '无'
+
+                    # 实例名称
+                    instance_name = details.get('instance_name') or '未命名'
+
+                    # 构建消息
+                    msg = (
+                        f"📊 <b>实例状态</b>\n\n"
+                        f"🖥 名称: {instance_name}\n"
+                        f"📌 状态: {status_text}\n"
+                        f"💳 计费方式: {charge}\n"
+                        f"📦 规格: {details['instance_type']} ({details['cpu']} vCPU, {memory_gb:.1f} GB)\n"
+                        f"💾 系统盘: {disk_text}\n"
+                        f"🔗 弹性IP: {eip_text}\n"
+                        f"📊 CDT流量: {traffic:.2f} GB / {CDT_LIMIT_GB} GB" if traffic else "CDT查询失败"
+                    )
+
+                    # 如果是抢占式实例，显示自动释放时间
+                    if details.get('auto_release_time'):
+                        release_time = datetime.strptime(details['auto_release_time'], '%Y-%m-%dT%H:%M:%SZ').strftime('%Y-%m-%d %H:%M')
+                        msg += f"\n⏳ 自动释放时间: {release_time} (UTC+8)"
+
+                    msg += f"\n\n🕐 查询时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
                     send_tg_message(msg, chat_id)
                 elif text == '/cdt':
                     traffic = query_cdt_traffic()
