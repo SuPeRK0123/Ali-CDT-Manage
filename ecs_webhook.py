@@ -255,11 +255,15 @@ def stop_instance():
 
 # ================== 核心开机逻辑（含CDT检查） ==================
 def auto_start_with_check(chat_id=None):
-    # 1. 检查CDT
+    # 1. 检查CDT（带一次重试）
     traffic = query_cdt_traffic()
     if traffic is None:
-        send_tg_message("⚠️ CDT流量查询失败，放弃自动开机", chat_id)
-        return False
+        logger.warning("CDT查询失败，等待3秒后重试...")
+        time.sleep(3)
+        traffic = query_cdt_traffic()
+        if traffic is None:
+            send_tg_message("⚠️ CDT流量查询失败（重试后仍失败），放弃自动开机", chat_id)
+            return False
 
     if traffic >= CDT_LIMIT_GB:
         send_tg_message(
