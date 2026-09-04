@@ -90,17 +90,37 @@ EOF
 # 由于篇幅，实际使用时可将脚本文件内容放在此处，或用 curl 下载
 # 为了演示，我假定脚本已存在于当前目录，复制到目标目录
 # 实际生产时，您可以将脚本文件与 install.sh 一同打包，或使用 wget 从 raw 链接获取
-# 这里采用“从当前目录复制”的方式，便于本地测试
+# 这里采用"从当前目录复制"的方式，便于本地测试
 
 echo -e "${YELLOW}>>> 部署脚本文件...${NC}"
 if [[ -f "ecs_webhook.py" ]]; then
     cp ecs_webhook.py cdt_auto_stop.py cdt_daily_report.py "$INSTALL_DIR/"
 else
-    # 如果当前目录没有，则从网络拉取（您需要替换为实际 raw 链接）
+    # 如果当前目录没有，则从网络拉取
     echo -e "${YELLOW}本地未找到脚本，从 GitHub 下载...${NC}"
-    curl -s -o "$INSTALL_DIR/ecs_webhook.py" "https://raw.githubusercontent.com/SuPeRK0123/Ali-CDT-Manage/refs/heads/main/ecs_webhook.py"
-    curl -s -o "$INSTALL_DIR/cdt_auto_stop.py" "https://raw.githubusercontent.com/SuPeRK0123/Ali-CDT-Manage/refs/heads/main/cdt_auto_stop.py"
-    curl -s -o "$INSTALL_DIR/cdt_daily_report.py" "https://raw.githubusercontent.com/SuPeRK0123/Ali-CDT-Manage/refs/heads/main/cdt_daily_report.py"
+    
+    # 定义重试下载函数
+    retry_curl() {
+        local url="$1"
+        local output="$2"
+        local retries=3
+        local count=0
+        while [ $count -lt $retries ]; do
+            if curl -s -o "$output" "$url"; then
+                return 0
+            fi
+            count=$((count + 1))
+            echo -e "${YELLOW}下载失败 ($count/$retries)，等待 2 秒后重试...${NC}"
+            sleep 2
+        done
+        echo -e "${RED}下载 $url 失败，请检查网络后重新运行安装脚本。${NC}"
+        return 1
+    }
+    
+    # 使用重试函数下载
+    retry_curl "https://raw.githubusercontent.com/SuPeRK0123/Ali-CDT-Manage/refs/heads/main/ecs_webhook.py" "$INSTALL_DIR/ecs_webhook.py" || exit 1
+    retry_curl "https://raw.githubusercontent.com/SuPeRK0123/Ali-CDT-Manage/refs/heads/main/cdt_auto_stop.py" "$INSTALL_DIR/cdt_auto_stop.py" || exit 1
+    retry_curl "https://raw.githubusercontent.com/SuPeRK0123/Ali-CDT-Manage/refs/heads/main/cdt_daily_report.py" "$INSTALL_DIR/cdt_daily_report.py" || exit 1
 fi
 chmod +x "$INSTALL_DIR"/*.py
 
