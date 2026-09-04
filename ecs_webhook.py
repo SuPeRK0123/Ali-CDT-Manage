@@ -363,7 +363,7 @@ def manual_status():
     return jsonify({
         "instance_id": ECS_INSTANCE_ID,
         "status": status,
-        "cdt_traffic_gb": round(traffic, 2) if traffic else None,
+        "cdt_traffic_gb": round(traffic, 2) if traffic is not None else None,
         "cdt_limit_gb": CDT_LIMIT_GB
     })
 
@@ -447,7 +447,7 @@ def tg_command_listener():
                     instance_name = details.get('instance_name') or '未命名'
 
                     # 构建消息
-                    cdt_line = f"📊 CDT流量: {traffic:.2f} GB / {CDT_LIMIT_GB} GB" if traffic else "📊 CDT查询失败"
+                    cdt_line = f"📊 CDT流量: {traffic:.2f} GB / {CDT_LIMIT_GB} GB" if traffic is not None else "📊 CDT查询失败"
                     msg = (
                         f"📊 <b>实例状态</b>\n\n"
                         f"🖥 名称: {instance_name}\n"
@@ -469,7 +469,7 @@ def tg_command_listener():
                     send_tg_message(msg, chat_id)
                 elif text == '/cdt':
                     traffic = query_cdt_traffic()
-                    msg = f"📊 当前CDT流量: {traffic:.2f} GB / {CDT_LIMIT_GB} GB" if traffic else "查询失败"
+                    msg = f"📊 当前CDT流量: {traffic:.2f} GB / {CDT_LIMIT_GB} GB" if traffic is not None else "查询失败"
                     send_tg_message(msg, chat_id)
                 elif text == '/help':
                     help_text = (
