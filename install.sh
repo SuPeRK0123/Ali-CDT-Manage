@@ -98,9 +98,9 @@ if [[ -f "ecs_webhook.py" ]]; then
 else
     # 如果当前目录没有，则从网络拉取（您需要替换为实际 raw 链接）
     echo -e "${YELLOW}本地未找到脚本，从 GitHub 下载...${NC}"
-    curl -s -o "$INSTALL_DIR/ecs_webhook.py" "https://raw.githubusercontent.com/your-repo/ecs-auto/main/ecs_webhook.py"
-    curl -s -o "$INSTALL_DIR/cdt_auto_stop.py" "https://raw.githubusercontent.com/your-repo/ecs-auto/main/cdt_auto_stop.py"
-    curl -s -o "$INSTALL_DIR/cdt_daily_report.py" "https://raw.githubusercontent.com/your-repo/ecs-auto/main/cdt_daily_report.py"
+    curl -s -o "$INSTALL_DIR/ecs_webhook.py" "https://raw.githubusercontent.com/SuPeRK0123/Ali-CDT-Manage/refs/heads/main/ecs_webhook.py"
+    curl -s -o "$INSTALL_DIR/cdt_auto_stop.py" "https://raw.githubusercontent.com/SuPeRK0123/Ali-CDT-Manage/refs/heads/main/cdt_auto_stop.py"
+    curl -s -o "$INSTALL_DIR/cdt_daily_report.py" "https://raw.githubusercontent.com/SuPeRK0123/Ali-CDT-Manage/refs/heads/main/cdt_daily_report.py"
 fi
 chmod +x "$INSTALL_DIR"/*.py
 
