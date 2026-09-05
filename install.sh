@@ -79,10 +79,12 @@ cat > "$INSTALL_DIR/config.json" <<EOF
     "tg_bot_token": "$TG_BOT_TOKEN",
     "tg_chat_id": "$TG_CHAT_ID",
     "cdt_limit_gb": $CDT_LIMIT,
-    "cdt_safe_gb": $((CDT_LIMIT - 5)),
+    "cdt_safe_gb": $((CDT_LIMIT - 10)),
     "balance_warn": $BALANCE_WARN,
     "webhook_port": $WEBHOOK_PORT,
-    "lock_file": "$LOCK_FILE"
+    "lock_file": "$LOCK_FILE",
+    "alert_interval_minutes": 60,
+    "alert_threshold_gb": 10
 }
 EOF
 
@@ -161,12 +163,12 @@ EOF
 
 cat > /etc/systemd/system/cdt-stop.timer <<EOF
 [Unit]
-Description=CDT Stop Timer (every 30min)
+Description=CDT Stop Timer (random 20-40min)
 
 [Timer]
 OnBootSec=5min
-OnUnitActiveSec=30min
-RandomizedDelaySec=2min
+OnUnitActiveSec=20min
+RandomizedDelaySec=20min
 
 [Install]
 WantedBy=timers.target
@@ -190,7 +192,7 @@ cat > /etc/systemd/system/cdt-report.timer <<EOF
 Description=CDT Daily Report Timer
 
 [Timer]
-OnCalendar=*-*-* 09:00:00
+OnCalendar=*-*-* 09:00:00,20:00:00
 Persistent=true
 
 [Install]
