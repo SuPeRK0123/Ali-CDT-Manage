@@ -25,9 +25,9 @@ TG_BOT_TOKEN = config['tg_bot_token']
 TG_CHAT_ID = config['tg_chat_id']
 CDT_LIMIT_GB = config['cdt_limit_gb']
 
-# 流量突增告警配置（可从 config.json 读取，或直接定义）
-ALERT_INTERVAL_MINUTES = 60      # 监控窗口（分钟）
-ALERT_THRESHOLD_GB = 10          # 阈值（GB）
+# 从配置文件读取，并提供默认值
+ALERT_INTERVAL_MINUTES = config.get('alert_interval_minutes', 60)
+ALERT_THRESHOLD_GB = config.get('alert_threshold_gb', 10)
 HISTORY_FILE = '/var/run/cdt_history.json'
 
 # ================== 日志 ==================
@@ -39,14 +39,25 @@ client = AcsClient(ACCESS_KEY_ID, ACCESS_KEY_SECRET, REGION_ID)
 
 # ================== Telegram 通知 ==================
 def send_tg(msg):
+    """发送 Telegram 消息，带一次重试"""
+    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TG_CHAT_ID,
+        "text": msg,
+        "parse_mode": "HTML"
+    }
     try:
-        tg_requests.post(
-            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
-            json={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "HTML"},
-            timeout=10
-        )
+        tg_requests.post(url, json=payload, timeout=10)
+        logger.info("Telegram 通知已发送")
+        return
     except Exception as e:
-        logger.error(f"TG发送失败: {e}")
+        logger.warning(f"发送TG消息失败，2秒后重试: {e}")
+        time.sleep(2)
+        try:
+            tg_requests.post(url, json=payload, timeout=10)
+            logger.info("Telegram 通知已发送（重试成功）")
+        except Exception as e2:
+            logger.error(f"发送TG消息失败（重试后仍失败）: {e2}")
 
 # ================== CDT 流量查询 ==================
 def query_cdt():
@@ -139,7 +150,10 @@ def main():
     is_spike, diff, time_diff = check_traffic_spike(traffic)
     if is_spike:
         # 计算平均速率（GB/小时）
-        avg_rate = diff / (time_diff / 60)
+        if time_diff > 0:
+            avg_rate = diff / (time_diff / 60)
+        else:
+            avg_rate = 0.0
         send_tg(
             f"⚠️ <b>CDT 流量突增告警</b>\n\n"
             f"📊 当前总流量: {traffic:.2f} GB\n"
