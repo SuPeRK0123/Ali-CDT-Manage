@@ -12,7 +12,7 @@ echo -e "${GREEN}  阿里云抢占式实例自动保活套件 安装  ${NC}"
 echo -e "${GREEN}========================================${NC}"
 
 if [[ $EUID -ne 0 ]]; then
-   echo -e "${RED}请使用 root 用户运行此脚本（或使用 sudo）${NC}" 
+   echo -e "${RED}请使用 root 用户运行此脚本（或使用 sudo）${NC}"
    exit 1
 fi
 
@@ -47,9 +47,9 @@ else
     yum install -y python3 python3-pip curl
 fi
 
-# 3. 安装 Python 依赖
+# 3. 安装 Python 依赖（移除 bssopenapi）
 echo -e "${YELLOW}>>> 安装 Python 依赖...${NC}"
-pip3 install -q --break-system-packages flask gunicorn aliyun-python-sdk-core aliyun-python-sdk-ecs aliyun-python-sdk-bssopenapi requests
+pip3 install -q --break-system-packages flask gunicorn aliyun-python-sdk-core aliyun-python-sdk-ecs requests
 
 # 4. 收集配置信息
 echo -e "${YELLOW}>>> 请输入配置信息：${NC}"
@@ -62,6 +62,12 @@ read -p "Telegram Bot Token: " TG_BOT_TOKEN
 read -p "Telegram Chat ID (用户ID或群组ID): " TG_CHAT_ID
 read -p "CDT免费额度上限(GB, 默认200): " CDT_LIMIT
 CDT_LIMIT=${CDT_LIMIT:-200}
+
+# 【新增】让用户输入安全启动阈值
+DEFAULT_SAFE=$((CDT_LIMIT - 5))
+read -p "CDT安全启动阈值(GB, 建议低于上限5-10GB, 默认${DEFAULT_SAFE}): " CDT_SAFE
+CDT_SAFE=${CDT_SAFE:-$DEFAULT_SAFE}
+
 read -p "余额预警阈值(CNY, 默认10): " BALANCE_WARN
 BALANCE_WARN=${BALANCE_WARN:-10}
 read -p "Webhook监听端口(默认8080): " WEBHOOK_PORT
@@ -79,7 +85,7 @@ cat > "$INSTALL_DIR/config.json" <<EOF
     "tg_bot_token": "$TG_BOT_TOKEN",
     "tg_chat_id": "$TG_CHAT_ID",
     "cdt_limit_gb": $CDT_LIMIT,
-    "cdt_safe_gb": $((CDT_LIMIT - 10)),
+    "cdt_safe_gb": $CDT_SAFE,
     "balance_warn": $BALANCE_WARN,
     "webhook_port": $WEBHOOK_PORT,
     "lock_file": "$LOCK_FILE",
@@ -88,20 +94,13 @@ cat > "$INSTALL_DIR/config.json" <<EOF
 }
 EOF
 
-# 6. 创建 Python 脚本（此处直接嵌入，避免外部下载）
-# 由于篇幅，实际使用时可将脚本文件内容放在此处，或用 curl 下载
-# 为了演示，我假定脚本已存在于当前目录，复制到目标目录
-# 实际生产时，您可以将脚本文件与 install.sh 一同打包，或使用 wget 从 raw 链接获取
-# 这里采用"从当前目录复制"的方式，便于本地测试
-
+# 6. 部署脚本文件
 echo -e "${YELLOW}>>> 部署脚本文件...${NC}"
 if [[ -f "ecs_webhook.py" ]]; then
     cp ecs_webhook.py cdt_auto_stop.py cdt_daily_report.py "$INSTALL_DIR/"
 else
-    # 如果当前目录没有，则从网络拉取
     echo -e "${YELLOW}本地未找到脚本，从 GitHub 下载...${NC}"
-    
-    # 定义重试下载函数
+
     retry_curl() {
         local url="$1"
         local output="$2"
@@ -118,8 +117,7 @@ else
         echo -e "${RED}下载 $url 失败，请检查网络后重新运行安装脚本。${NC}"
         return 1
     }
-    
-    # 使用重试函数下载
+
     retry_curl "https://raw.githubusercontent.com/SuPeRK0123/Ali-CDT-Manage/refs/heads/main/ecs_webhook.py" "$INSTALL_DIR/ecs_webhook.py" || exit 1
     retry_curl "https://raw.githubusercontent.com/SuPeRK0123/Ali-CDT-Manage/refs/heads/main/cdt_auto_stop.py" "$INSTALL_DIR/cdt_auto_stop.py" || exit 1
     retry_curl "https://raw.githubusercontent.com/SuPeRK0123/Ali-CDT-Manage/refs/heads/main/cdt_daily_report.py" "$INSTALL_DIR/cdt_daily_report.py" || exit 1
