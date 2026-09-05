@@ -86,7 +86,19 @@ def get_public_ip():
         if not instances:
             return "无实例"
         inst = instances[0]
-        return inst.get('EipAddress', {}).get('IpAddress') or inst.get('PublicIpAddress', {}).get('IpAddress', ['无'])[0]
+
+        # 优先 EIP
+        eip = inst.get('EipAddress', {})
+        if eip.get('IpAddress'):
+            return eip['IpAddress']
+
+        # 其次公网 IP（安全取值）
+        public_ip_obj = inst.get('PublicIpAddress', {})
+        public_ips = public_ip_obj.get('IpAddress', [])
+        if public_ips:
+            return public_ips[0]
+
+        return "无"
     except Exception as e:
         logger.error(f"IP查询失败: {e}")
         return "获取失败"
