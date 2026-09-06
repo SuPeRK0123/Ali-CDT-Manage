@@ -190,7 +190,8 @@ cat > /etc/systemd/system/cdt-report.timer <<EOF
 Description=CDT Daily Report Timer
 
 [Timer]
-OnCalendar=*-*-* 09:00:00,20:00:00
+OnCalendar=*-*-* 09:00:00
+OnCalendar=*-*-* 20:00:00
 Persistent=true
 
 [Install]
