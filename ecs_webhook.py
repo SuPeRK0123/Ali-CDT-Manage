@@ -283,13 +283,13 @@ def auto_start_with_check(chat_id=None):
         return False
 
     if traffic >= CDT_SAFE_GB:
-    send_tg_message(
-        f"🚫 拒绝自动开机 - CDT已接近上限\n"
-        f"当前: {traffic:.2f} GB / 安全阈值: {CDT_SAFE_GB} GB",
-        chat_id
-    )
-    logger.warning(f"CDT接近上限({traffic:.2f}GB)，拒绝开机")
-    return False
+        send_tg_message(
+            f"🚫 拒绝自动开机 - CDT已接近上限\n"
+            f"当前: {traffic:.2f} GB / 安全阈值: {CDT_SAFE_GB} GB",
+            chat_id
+        )
+        logger.warning(f"CDT接近上限({traffic:.2f}GB)，拒绝开机")
+        return False
 
     # 2. 执行开机
     success, msg = start_instance_with_retry()
