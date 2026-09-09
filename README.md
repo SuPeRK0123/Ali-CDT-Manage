@@ -138,3 +138,10 @@ systemctl restart ecs-webhook
 - 确认云监控订阅策略中事件名称、推送渠道 URL 配置正确
 - 在云监控控制台使用“事件调试”功能发送测试事件，验证 Webhook 连通性
 - 查看 VPS 日志：`journalctl -u ecs-webhook -f`
+
+---
+
+## 参考资料
+
+- [使用系统事件报警回调（推荐）](https://help.aliyun.com/zh/cms/cloudmonitor-1-0/user-guide/configure-callbacks-for-system-event-triggered-alerts-recommended) - 云监控 Webhook 配置官方文档
+- [管理事件订阅（推荐）](https://help.aliyun.com/zh/cms/cloudmonitor-1-0/user-guide/manage-notification-policies) - 事件订阅管理指南
