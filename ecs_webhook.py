@@ -303,13 +303,40 @@ def auto_start_with_check(chat_id=None):
 # ================== Webhook 事件处理 ==================
 
 def handle_state_change(event_data):
-    # 兼容两种结构：有 content 或直接是状态字段
-    content = event_data.get('content', {})
-    instance_id = content.get('resourceId') or event_data.get('resourceId')
-    new_state = content.get('state') or event_data.get('state')
+    # 兼容多种事件结构：
+    # 1. EventBridge 格式: data.resourceId / data.state
+    # 2. 云监控格式: alert.eventContentMap.resourceId / alert.eventContentMap.state
+    # 3. 顶层直接包含 resourceId / state
+
+    instance_id = None
+    new_state = None
+
+    # 尝试从 alert.eventContentMap 获取（云监控）
+    alert = event_data.get('alert', {})
+    content_map = alert.get('eventContentMap', {})
+    if content_map:
+        instance_id = content_map.get('resourceId')
+        new_state = content_map.get('state')
+
+    # 如果从 content 中没有取到，尝试从 content 字段
+    if not instance_id or not new_state:
+        content = event_data.get('content', {})
+        if content:
+            instance_id = content.get('instanceId') or content.get('resourceId')
+            new_state = content.get('state')
+
+    # 如果还没有，尝试从顶层获取（EventBridge 格式或兜底）
+    if not instance_id or not new_state:
+        instance_id = event_data.get('resourceId') or event_data.get('instanceId')
+        new_state = event_data.get('state')
+
+    # 如果是 ARN 格式，提取纯实例 ID
+    if instance_id and isinstance(instance_id, str) and instance_id.startswith('acs:'):
+        instance_id = instance_id.split('/')[-1]
 
     if not instance_id or not new_state:
-        logger.warning("事件缺少 resourceId 或 state，忽略")
+        logger.warning("事件缺少 resourceId/instanceId 或 state，忽略")
+        logger.warning(f"事件内容(前500字符): {json.dumps(event_data, ensure_ascii=False)[:500]}")
         return
 
     logger.info(f"收到事件: 实例 {instance_id} -> {new_state}")
@@ -340,7 +367,11 @@ def webhook():
         if not data:
             return jsonify({"code": 0, "msg": "ok"}), 200
 
-        logger.info(f"收到原始事件: {json.dumps(data, ensure_ascii=False)[:300]}")
+        alert = data.get('alert', {})
+        event_id = data.get('id', 'unknown')
+        event_name = alert.get('eventName', data.get('eventName', 'unknown'))
+        resource_id = alert.get('eventContentMap', {}).get('resourceId', 'unknown')
+        logger.info(f"收到事件: {event_id} - {event_name} - 实例: {resource_id}")
 
         # 提取事件数据
         if 'source' in data and data.get('source') == 'acs.ecs':
