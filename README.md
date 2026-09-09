@@ -4,10 +4,11 @@
 
 ## 功能
 
-- **⚡ 自动开机**：实例被关机时，通过 EventBridge 事件触发自动开机（带 CDT 前置检查）
-- **🛑 超额关机**：每 30 分钟检查 CDT 流量，超限自动执行节省停机（StopCharging）
+- **⚡ 自动开机**：实例被关机时，通过云监控事件订阅触发自动开机（带 CDT 前置检查）
+- **🛑 超额关机**：每 20-40 分钟随机检查 CDT 流量，超限自动执行节省停机（StopCharging）
+- **⚠️ 流量突增告警**：短时流量突增时主动推送 Telegram 告警
 - **🤖 Telegram 交互**：发送 `/start`、`/stop`、`/status`、`/cdt` 远程操控
-- **📊 每日报告**：定时推送 CDT 用量、账户余额、公网 IP
+- **📊 每日报告**：定时推送 CDT 用量、公网 IP（不含余额）
 - **🔒 防重复触发**：文件锁防止并发操作
 
 ---
@@ -33,18 +34,37 @@ sudo ./install.sh
 
 安装完成后，服务自动启动。
 
-### 2. 配置阿里云 EventBridge（事件推送）
+### 2. 配置阿里云云监控事件订阅
 
-1. 登录 [EventBridge 控制台](https://eventbridge.console.aliyun.com/) → 进入 **default** 事件总线
-2. 创建规则：
-   - **事件源**：`acs.ecs`
-   - **事件类型**：`ecs:Instance:StateChange`
-3. 添加目标：
-   - **服务类型**：HTTP
-   - **URL**：`http://<您的VPS公网IP>:8080/webhook/ecs`（端口与安装时一致）
-   - **网络类型**：公网
-   - **Body**：完整事件
-4. 保存规则
+1. 登录 [云监控控制台](https://cloudmonitor.console.alibabacloud.com/) → **事件中心** → **事件订阅**
+2. 点击 **创建订阅策略**，按以下步骤配置：
+
+**① 基本信息**：填写策略名称（如 `ECS自动保活`）
+
+**② 报警订阅**：
+- 订阅类型：**系统事件**
+- 产品：**云服务器 ECS**
+- 事件类型：**状态通知**
+- 事件名称：**实例状态改变通知**
+- 事件等级：全部勾选
+- 事件资源：留空（由脚本过滤）
+- 事件内容：留空
+
+**③ 合并降噪**：选择 **直接触发，不抑制**
+
+**④ 推送与集成**：
+- 点击 **添加渠道**，创建 Webhook 推送渠道：
+  - 渠道名称：`ECS状态变化Webhook`
+  - 目标类型：`Webhook`
+  - 请求方法：`POST`
+  - 数据格式：`JSON`
+  - 地址：`http://<您的VPS公网IP>:8080/webhook/ecs`
+  - 自定义 Header：无需添加
+  - 签名混淆字符串：留空
+  - 通知模板：可选
+- 在推送渠道列表中选择刚创建的渠道
+
+3. 点击 **提交** 完成创建
 
 ---
 
@@ -91,9 +111,6 @@ journalctl -u cdt-report.service -f # 每日报告执行日志
 |------|----------|
 | ECS 开关机、查询状态 | `AliyunECSFullAccess` |
 | CDT 流量查询 | `AliyunCDTFullAccess` |
-| 账户余额查询（可选） | `AliyunBSSReadOnlyAccess` |
-
-> 按最小权限原则，也可自定义策略仅包含 `ecs:StartInstances`、`ecs:StopInstances`、`ecs:DescribeInstances`、`cdt:ListCdtInternetTraffic`、`bssapi:QueryAccountBalance`。
 
 ---
 
@@ -118,5 +135,6 @@ systemctl restart ecs-webhook
 - 检查 VPS 能否访问 Telegram API：`curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates"`
 
 ### 事件未触发自动开机
-- 确认 EventBridge 规则中 URL、网络类型、Body 配置正确
-- 在 EventBridge 控制台使用“事件追踪”查看投递记录
+- 确认云监控订阅策略中事件名称、推送渠道 URL 配置正确
+- 在云监控控制台使用“事件调试”功能发送测试事件，验证 Webhook 连通性
+- 查看 VPS 日志：`journalctl -u ecs-webhook -f`
