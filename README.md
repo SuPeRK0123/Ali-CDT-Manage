@@ -194,7 +194,6 @@ sudo ./install.sh --uninstall
     "tg_chat_id": "...",
     "cdt_limit_gb": 200,
     "cdt_safe_gb": 195,
-    "balance_warn": 10,
     "webhook_port": 8080,
     "lock_file": "/var/run/ecs-auto.lock",
     "alert_interval_minutes": 60,
