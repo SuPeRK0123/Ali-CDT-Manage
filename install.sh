@@ -93,6 +93,7 @@ do_uninstall() {
     if [[ "$DEL_DATA" =~ ^[Yy]$ ]]; then
         rm -rf "$INSTALL_DIR"
         rm -f "$SOCKET_PATH" /var/run/cdt_history.json
+        rm -f "$NGINX_CONF"
         echo -e "${GREEN}数据已删除${NC}"
     fi
 
@@ -166,9 +167,12 @@ fi
 
 # ==================== 安装 Python 依赖 ====================
 echo -e "${YELLOW}>>> 安装 Python 依赖...${NC}"
-pip3 install -q --break-system-packages \
-    flask gunicorn requests \
-    aliyun-python-sdk-core aliyun-python-sdk-ecs
+if ! pip3 install -q --break-system-packages flask gunicorn requests \
+    aliyun-python-sdk-core aliyun-python-sdk-ecs 2>/dev/null; then
+    echo -e "${YELLOW}兼容模式：尝试不使用 --break-system-packages...${NC}"
+    pip3 install -q flask gunicorn requests \
+        aliyun-python-sdk-core aliyun-python-sdk-ecs
+fi
 
 # ==================== 收集配置 ====================
 echo -e "${YELLOW}>>> 请输入配置信息：${NC}"
