@@ -186,8 +186,6 @@ DEFAULT_SAFE=$((CDT_LIMIT - 5))
 read -p "CDT安全启动阈值(GB, 建议低于上限5-10GB, 默认${DEFAULT_SAFE}): " CDT_SAFE
 CDT_SAFE=${CDT_SAFE:-$DEFAULT_SAFE}
 
-read -p "余额预警阈值(CNY, 默认10): " BALANCE_WARN
-BALANCE_WARN=${BALANCE_WARN:-10}
 read -p "Webhook监听端口(默认8080, 由Nginx对外监听): " WEBHOOK_PORT
 WEBHOOK_PORT=${WEBHOOK_PORT:-8080}
 
@@ -213,7 +211,6 @@ cat > "$INSTALL_DIR/config.json" <<EOF
     "tg_chat_id": "$TG_CHAT_ID",
     "cdt_limit_gb": $CDT_LIMIT,
     "cdt_safe_gb": $CDT_SAFE,
-    "balance_warn": $BALANCE_WARN,
     "webhook_port": $WEBHOOK_PORT,
     "lock_file": "$LOCK_FILE",
     "alert_interval_minutes": 60,
