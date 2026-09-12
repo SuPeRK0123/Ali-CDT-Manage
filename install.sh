@@ -352,11 +352,12 @@ EOF
 echo -e "${YELLOW}>>> 写入 Nginx 配置...${NC}"
 cat > "$NGINX_CONF" <<EOF
 # Ali-CDT-Manage Webhook 反向代理
-# 只放行 /webhook/ecs 的 POST 请求，其余路径直接 444 断连
+# 公网只放行 /webhook/ecs 的 POST 请求；本地 API 仅限 127.0.0.1 访问
 server {
     listen ${WEBHOOK_PORT};
     server_name _;
 
+    # 阿里云事件推送
     location = /webhook/ecs {
         limit_except POST { deny all; }
 
@@ -366,9 +367,25 @@ server {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
 
         proxy_connect_timeout 5s;
-        proxy_read_timeout 10s;
+        proxy_read_timeout 120s;
     }
 
+    # 本地 API / 健康检查（仅本机可访问）
+    location ~ ^/(api/|health) {
+        allow 127.0.0.1;
+        allow ::1;
+        deny all;
+
+        proxy_pass http://unix:$SOCKET_PATH;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 120s;
+    }
+
+    # 其余全部断连
     location / {
         return 444;
     }
