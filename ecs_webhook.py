@@ -540,10 +540,10 @@ def tg_command_listener():
             # 对于其他异常，固定等待10秒后继续
             time.sleep(10)
 
-# ================== 启动 TG 监听线程（Gunicorn 兼容） ==================
-tg_thread = threading.Thread(target=tg_command_listener, daemon=True)
-tg_thread.start()
-
 # ================== 启动服务（仅直接运行时生效） ==================
+# 生产环境由 Gunicorn 加载本模块，以下代码不会执行。
+# Telegram 监听器已拆分为独立服务（tg_bot.py）。
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=WEBHOOK_PORT, debug=False)
+    # 本地调试：临时启动 Telegram 监听线程 + Flask 内置服务器
+    threading.Thread(target=tg_command_listener, daemon=True).start()
+    app.run(host='127.0.0.1', port=WEBHOOK_PORT + 1, debug=False)
