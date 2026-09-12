@@ -24,6 +24,7 @@ ECS_INSTANCE_ID = config['ecs_instance_id']
 TG_BOT_TOKEN = config['tg_bot_token']
 TG_CHAT_ID = config['tg_chat_id']
 CDT_LIMIT_GB = config['cdt_limit_gb']
+CDT_SAFE_GB = config.get('cdt_safe_gb', CDT_LIMIT_GB)
 
 # 从配置文件读取，并提供默认值
 ALERT_INTERVAL_MINUTES = config.get('alert_interval_minutes', 60)
@@ -161,6 +162,15 @@ def main():
             f"⏱ 时间窗口: {time_diff:.1f} 分钟\n"
             f"📊 平均速率: {avg_rate:.2f} GB/小时\n"
             f"🕐 检测时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+    if traffic >= CDT_SAFE_GB and traffic < CDT_LIMIT_GB:
+        send_tg(
+            f"⚠️ <b>CDT 接近上限</b>\n\n"
+            f"📊 当前流量: {traffic:.2f} GB\n"
+            f"🟡 安全阈值: {CDT_SAFE_GB} GB\n"
+            f"🔴 上限阈值: {CDT_LIMIT_GB} GB\n"
+            f"💡 建议：如需继续使用，请手动提升额度或停止实例。"
         )
 
     # 3. 超额自动关机（原有逻辑）
