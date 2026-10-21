@@ -10,6 +10,7 @@ from datetime import datetime
 import requests as tg_requests
 from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
+from aliyunsdkcore.acs_exception.exceptions import ClientException
 from aliyunsdkecs.request.v20140526 import StopInstancesRequest, DescribeInstancesRequest
 
 # ================== 加载配置 ==================
@@ -25,6 +26,14 @@ TG_BOT_TOKEN = config['tg_bot_token']
 TG_CHAT_ID = config['tg_chat_id']
 CDT_LIMIT_GB = config['cdt_limit_gb']
 CDT_SAFE_GB = config.get('cdt_safe_gb', CDT_LIMIT_GB)
+NON_RETRYABLE_CODES = {
+    'InvalidAccessKeyId',
+    'InvalidAccessKeyId.NotFound',
+    'Forbidden',
+    'SignatureDoesNotMatch',
+    'NoPermission',
+    'UnauthorizedOperation',
+}
 
 # 从配置文件读取，并提供默认值
 ALERT_INTERVAL_MINUTES = config.get('alert_interval_minutes', 60)
@@ -62,18 +71,54 @@ def send_tg(msg):
 
 # ================== CDT 流量查询 ==================
 def query_cdt():
-    try:
-        req = CommonRequest()
-        req.set_domain('cdt.aliyuncs.com')
-        req.set_version('2021-08-13')
-        req.set_action_name('ListCdtInternetTraffic')
-        req.set_method('POST')
-        resp = client.do_action_with_exception(req)
-        data = json.loads(resp.decode('utf-8'))
-        return sum(d.get('Traffic', 0) for d in data.get('TrafficDetails', [])) / (1024 ** 3)
-    except Exception as e:
-        logger.error(f"CDT查询失败: {e}")
-        return None
+    """单次查询 CDT 流量；失败时抛出异常，由调用方决定是否重试"""
+    req = CommonRequest()
+    req.set_domain('cdt.aliyuncs.com')
+    req.set_version('2021-08-13')
+    req.set_action_name('ListCdtInternetTraffic')
+    req.set_method('POST')
+    resp = client.do_action_with_exception(req)
+    data = json.loads(resp.decode('utf-8'))
+    return sum(d.get('Traffic', 0) for d in data.get('TrafficDetails', [])) / (1024 ** 3)
+
+
+def query_cdt_with_retry(max_attempts=3, base_delay=5):
+    """
+    带重试与退避的 CDT 查询。
+    - 不可重试错误码：发告警并立即返回 None（配置问题不会自愈）
+    - 其他错误：退避重试，最多 max_attempts 次；全部失败仅记日志
+    """
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return query_cdt()
+        except ClientException as e:
+            code = ''
+            try:
+                code = e.get_error_code() or ''
+            except Exception:
+                pass
+            logger.error(f"CDT 查询失败 (尝试 {attempt}/{max_attempts}): [{code}] {e}")
+            if code in NON_RETRYABLE_CODES:
+                logger.error(f"错误码 {code} 属于不可重试类型，终止")
+                send_tg(
+                    f"🚨 <b>CDT 查询鉴权失败</b>\n\n"
+                    f"错误码: <code>{code}</code>\n"
+                    f"💡 请检查 AccessKey 是否有效、是否具备 CDT 权限。\n"
+                    f"⚠️ 自动关机任务已暂停，直到问题修复。"
+                )
+                return None
+            if attempt < max_attempts:
+                delay = base_delay * attempt
+                logger.warning(f"{delay}s 后重试...")
+                time.sleep(delay)
+        except Exception as e:
+            logger.error(f"CDT 查询异常 (尝试 {attempt}/{max_attempts}): {e}")
+            if attempt < max_attempts:
+                delay = base_delay * attempt
+                logger.warning(f"{delay}s 后重试...")
+                time.sleep(delay)
+    logger.error(f"CDT 查询在 {max_attempts} 次尝试后仍失败")
+    return None
 
 # ================== 实例状态查询 ==================
 def get_status():
@@ -140,10 +185,10 @@ def check_traffic_spike(current_traffic):
 
 # ================== 主程序 ==================
 def main():
-    # 1. 查询 CDT 流量
-    traffic = query_cdt()
+    # 1. 查询 CDT 流量（带重试）
+    traffic = query_cdt_with_retry()
     if traffic is None:
-        logger.error("CDT查询失败，退出")
+        logger.error("CDT 查询在重试后仍失败，跳过本轮检查")
         return
     logger.info(f"当前CDT流量: {traffic:.2f} GB")
 
