@@ -90,7 +90,10 @@ def query_cdt_with_retry(max_attempts=3, base_delay=5):
     """
     for attempt in range(1, max_attempts + 1):
         try:
-            return query_cdt()
+            traffic = query_cdt()
+            if attempt > 1:
+                logger.info(f"CDT 查询在第 {attempt} 次尝试后成功: {traffic:.2f} GB")
+            return traffic
         except ClientException as e:
             code = ''
             try:
