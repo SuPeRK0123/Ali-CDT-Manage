@@ -40,6 +40,7 @@ LOCK_FILE = config.get('lock_file', '/var/run/ecs-auto.lock')
 
 MAX_RETRIES = 5
 RETRY_INTERVAL = 10
+PAUSE_FLAG = '/var/run/ecs-auto.paused'
 
 # ================== 日志 ==================
 logging.basicConfig(
@@ -89,6 +90,26 @@ class PIDLock:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
+
+# ================== 维护模式 ==================
+def is_paused():
+    """检查是否处于维护模式（主动暂停自动保活）"""
+    return os.path.exists(PAUSE_FLAG)
+
+def set_paused(paused):
+    """进入/退出维护模式。paused=True 创建标志，False 删除标志"""
+    try:
+        if paused:
+            with open(PAUSE_FLAG, 'w') as f:
+                f.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            logger.info(f"已进入维护模式: {PAUSE_FLAG}")
+        else:
+            os.remove(PAUSE_FLAG)
+            logger.info("已退出维护模式")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.error(f"设置维护模式失败: {e}")
 
 # ================== Telegram 通知 ==================
 def send_tg_message(message, chat_id=None):
@@ -349,6 +370,11 @@ def handle_state_change(event_data):
         logger.info(f"状态为 {new_state}，不触发开机")
         return
 
+    # 维护模式检查：主动暂停时跳过自动开机
+    if is_paused():
+        logger.info("维护模式已启用，跳过自动开机")
+        return
+
     # 使用文件锁防止重复
     try:
         with PIDLock():
@@ -391,6 +417,7 @@ def webhook():
 # ================== 手动控制 API ==================
 @app.route('/api/start', methods=['POST'])
 def manual_start():
+    set_paused(False)
     with PIDLock():
         success = auto_start_with_check()
     return jsonify({"success": success})
@@ -398,7 +425,13 @@ def manual_start():
 @app.route('/api/stop', methods=['POST'])
 def manual_stop():
     success, msg = stop_instance()
-    return jsonify({"success": success, "message": msg})
+    if success:
+        set_paused(True)
+    return jsonify({
+        "success": success,
+        "message": msg,
+        "paused": is_paused()
+    })
 
 @app.route('/api/status', methods=['GET'])
 def manual_status():
@@ -409,7 +442,8 @@ def manual_status():
         "instance_id": ECS_INSTANCE_ID,
         "status": status,
         "cdt_traffic_gb": round(traffic, 2) if traffic is not None else None,
-        "cdt_limit_gb": CDT_LIMIT_GB
+        "cdt_limit_gb": CDT_LIMIT_GB,
+        "paused": is_paused()
     })
 
 @app.route('/health', methods=['GET'])
@@ -449,11 +483,37 @@ def tg_command_listener():
 
                 # 处理命令（保持不变）
                 if text == '/start':
+                    set_paused(False)
                     with PIDLock():
                         auto_start_with_check(chat_id)
                 elif text == '/stop':
                     success, msg = stop_instance()
-                    send_tg_message(f"🛑 关机指令\n结果: {'成功' if success else '失败'}\n信息: {msg}", chat_id)
+                    if success:
+                        set_paused(True)
+                        send_tg_message(
+                            f"🛑 关机成功\n"
+                            f"信息: {msg}\n"
+                            f"🔧 已进入维护模式，不会自动开机\n"
+                            f"💡 发送 /start 立即开机，或 /resume 退出维护模式",
+                            chat_id
+                        )
+                    else:
+                        send_tg_message(f"❌ 关机失败\n信息: {msg}", chat_id)
+                elif text == '/pause':
+                    set_paused(True)
+                    send_tg_message(
+                        "🔧 已进入维护模式\n\n"
+                        "此后实例被关机（手动/系统回收）都不会自动开机。\n"
+                        "💡 发送 /resume 退出维护模式，或 /start 立即开机",
+                        chat_id
+                    )
+                elif text == '/resume':
+                    set_paused(False)
+                    send_tg_message(
+                        "✅ 已退出维护模式\n\n"
+                        "自动保活已恢复。实例若被关机将自动拉起。",
+                        chat_id
+                    )
                 elif text == '/status':
                     details = get_instance_details()
                     traffic = query_cdt_traffic()
@@ -507,6 +567,10 @@ def tg_command_listener():
                         release_time = datetime.strptime(details['auto_release_time'], '%Y-%m-%dT%H:%M:%SZ').strftime('%Y-%m-%d %H:%M')
                         msg += f"\n⏳ 自动释放时间: {release_time} (UTC+8)"
 
+                    # 维护模式提示
+                    if is_paused():
+                        msg += "\n\n🔧 维护模式: <b>已启用</b>（不会自动开机）"
+
                     msg += f"\n\n🕐 查询时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
                     send_tg_message(msg, chat_id)
@@ -517,8 +581,10 @@ def tg_command_listener():
                 elif text == '/help':
                     help_text = (
                         "🤖 可用命令：\n"
-                        "/start - 手动开机\n"
-                        "/stop - 手动关机（节省停机）\n"
+                        "/start - 手动开机（自动退出维护模式）\n"
+                        "/stop - 手动关机（自动进入维护模式）\n"
+                        "/pause - 进入维护模式（不自动开机）\n"
+                        "/resume - 退出维护模式\n"
                         "/status - 查询实例状态+CDT\n"
                         "/cdt - 仅查询CDT流量\n"
                         "/help - 显示帮助"
