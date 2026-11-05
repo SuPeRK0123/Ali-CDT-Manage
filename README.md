@@ -113,6 +113,8 @@ curl -X POST http://localhost:8080/api/stop    # 关机（节省停机）
 curl http://localhost:8080/api/status          # 查询状态 + CDT
 curl http://localhost:8080/health              # 健康检查
 ```
+> `/api/start` 会同时退出维护模式；`/api/stop` 成功后自动进入维护模式。
+> `/api/status` 返回中新增 `paused` 字段，表示当前是否处于维护模式。
 
 > 如果 Nginx 已启用本地限制，可用 `127.0.0.1:8080` 代替 `localhost`。
 
@@ -124,11 +126,15 @@ curl http://localhost:8080/health              # 健康检查
 
 | 命令 | 功能 |
 |------|------|
-| `/start` | 手动开机（自动检查CDT） |
-| `/stop` | 手动关机（节省停机） |
+| `/start` | 手动开机（自动退出维护模式） |
+| `/stop` | 手动关机（自动进入维护模式） |
+| `/pause` | 进入维护模式（不自动开机） |
+| `/resume` | 退出维护模式 |
 | `/status` | 查询实例状态 + CDT 流量 |
 | `/cdt` | 仅查询当前 CDT 流量 |
 | `/help` | 显示帮助 |
+
+> **维护模式说明**：进入维护模式后，实例即使被关机（手动或系统回收）也不会被自动拉起，适合临时省钱。发送 `/resume` 或 `/start` 可退出。
 
 ---
 
