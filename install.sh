@@ -90,10 +90,9 @@ do_uninstall() {
 
     echo -e "${YELLOW}是否删除配置和数据目录 $INSTALL_DIR？(y/N)${NC}"
     read -r DEL_DATA || true
-    if [[ "$DEL_DATA" =~ ^[Yy]$ ]]; then
+        if [[ "$DEL_DATA" =~ ^[Yy]$ ]]; then
         rm -rf "$INSTALL_DIR"
-        rm -f "$SOCKET_PATH" /var/run/cdt_history.json
-        rm -f "$NGINX_CONF"
+        rm -f "$SOCKET_PATH" /var/run/cdt_history.json /var/run/ecs-auto.lock /var/run/ecs-auto.paused
         echo -e "${GREEN}数据已删除${NC}"
     fi
 
