@@ -14,7 +14,7 @@ import time
 import fcntl
 import os
 import requests as tg_requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from aliyunsdkcore.client import AcsClient
 from aliyunsdkcore.request import CommonRequest
@@ -41,6 +41,7 @@ LOCK_FILE = config.get('lock_file', '/var/run/ecs-auto.lock')
 MAX_RETRIES = 5
 RETRY_INTERVAL = 10
 PAUSE_FLAG = '/var/run/ecs-auto.paused'
+SCHEDULE_FILE = '/opt/ecs-auto/schedule.json'
 
 # ================== 日志 ==================
 logging.basicConfig(
@@ -110,6 +111,172 @@ def set_paused(paused):
         pass
     except Exception as e:
         logger.error(f"设置维护模式失败: {e}")
+
+# ================== 定时开关机 ==================
+def load_schedule():
+    try:
+        with open(SCHEDULE_FILE, 'r') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    except Exception as e:
+        logger.error(f"读取 schedule.json 失败: {e}")
+        return None
+
+def save_schedule(data):
+    """原子写入 schedule.json"""
+    try:
+        tmp = SCHEDULE_FILE + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.rename(tmp, SCHEDULE_FILE)
+        logger.info(f"schedule.json 已更新: {data}")
+        return True
+    except Exception as e:
+        logger.error(f"写入 schedule.json 失败: {e}")
+        return False
+
+def _valid_hhmm(s):
+    """校验 HH:MM 格式"""
+    if len(s) != 5 or s[2] != ':':
+        return False
+    try:
+        h, m = int(s[:2]), int(s[3:])
+        return 0 <= h <= 23 and 0 <= m <= 59
+    except ValueError:
+        return False
+
+def _next_occurrence(hhmm):
+    """根据 HH:MM 计算下一次发生时间（若今日已过则推到明日）"""
+    h, m = map(int, hhmm.split(':'))
+    now = datetime.now()
+    target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+    if target <= now:
+        target = target + timedelta(days=1)
+    return target
+
+def handle_schedule_command(text, chat_id):
+    """处理 /schedule 系列命令"""
+    parts = text.split()
+    tz_str = datetime.now().astimezone().strftime('%Z %z')
+
+    # /schedule（无参数）：查看
+    if len(parts) == 1:
+        sc = load_schedule()
+        if not sc or not sc.get('stop_time'):
+            send_tg_message(
+                "📅 定时开关机配置\n\n"
+                "状态: ⚪ 未设置\n\n"
+                "💡 设置: /schedule 23:00 07:00\n"
+                "💡 说明: 关机时间 开机时间",
+                chat_id
+            )
+            return
+
+        enabled = sc.get('enabled', False)
+        status_text = "✅ 已启用" if enabled else "⏸ 已禁用"
+        msg = (
+            f"📅 <b>定时开关机配置</b>\n\n"
+            f"状态: {status_text}\n"
+            f"🔴 关机时间: {sc.get('stop_time')}\n"
+            f"🟢 开机时间: {sc.get('start_time')}\n"
+            f"🌏 时区: {tz_str}\n"
+        )
+        if enabled:
+            stop_next = _next_occurrence(sc['stop_time'])
+            start_next = _next_occurrence(sc['start_time'])
+            msg += (
+                f"\n⏰ 下次关机: {stop_next.strftime('%Y-%m-%d %H:%M')}\n"
+                f"⏰ 下次开机: {start_next.strftime('%Y-%m-%d %H:%M')}\n"
+            )
+        msg += (
+            f"\n💡 修改: /schedule 22:00 08:00\n"
+            f"💡 禁用: /schedule off\n"
+            f"💡 启用: /schedule on"
+        )
+        send_tg_message(msg, chat_id)
+        return
+
+    sub = parts[1].lower()
+
+    # /schedule off
+    if sub == 'off':
+        sc = load_schedule() or {}
+        sc['enabled'] = False
+        if save_schedule(sc):
+            send_tg_message(
+                "✅ 定时已禁用\n\n"
+                "💡 实例当前状态和维护模式不会被改变\n"
+                "💡 恢复: /schedule on",
+                chat_id
+            )
+        else:
+            send_tg_message("❌ 保存配置失败，请查看日志", chat_id)
+        return
+
+    # /schedule on
+    if sub == 'on':
+        sc = load_schedule() or {}
+        if not sc.get('stop_time') or not sc.get('start_time'):
+            send_tg_message(
+                "❌ 尚未设置时间\n\n"
+                "💡 请先设置: /schedule 23:00 07:00",
+                chat_id
+            )
+            return
+        sc['enabled'] = True
+        if save_schedule(sc):
+            stop_next = _next_occurrence(sc['stop_time'])
+            start_next = _next_occurrence(sc['start_time'])
+            send_tg_message(
+                f"✅ 定时已启用\n\n"
+                f"🔴 关机: {sc['stop_time']}\n"
+                f"🟢 开机: {sc['start_time']}\n"
+                f"⏰ 下次关机: {stop_next.strftime('%Y-%m-%d %H:%M')}\n"
+                f"⏰ 下次开机: {start_next.strftime('%Y-%m-%d %H:%M')}",
+                chat_id
+            )
+        else:
+            send_tg_message("❌ 保存配置失败，请查看日志", chat_id)
+        return
+
+    # /schedule HH:MM HH:MM（设置）
+    if len(parts) == 3 and _valid_hhmm(sub) and _valid_hhmm(parts[2].lower()):
+        stop_time = sub
+        start_time = parts[2].lower()
+        if stop_time == start_time:
+            send_tg_message("❌ 关机与开机时间不能相同", chat_id)
+            return
+        if save_schedule({
+            'enabled': True,
+            'stop_time': stop_time,
+            'start_time': start_time
+        }):
+            stop_next = _next_occurrence(stop_time)
+            start_next = _next_occurrence(start_time)
+            send_tg_message(
+                f"✅ 定时配置已更新\n\n"
+                f"🔴 关机: {stop_time}\n"
+                f"🟢 开机: {start_time}\n"
+                f"🌏 时区: {tz_str}\n\n"
+                f"⏰ 下次关机: {stop_next.strftime('%Y-%m-%d %H:%M')}\n"
+                f"⏰ 下次开机: {start_next.strftime('%Y-%m-%d %H:%M')}",
+                chat_id
+            )
+        else:
+            send_tg_message("❌ 保存配置失败，请查看日志", chat_id)
+        return
+
+    # 参数格式错误
+    send_tg_message(
+        "❌ 参数格式错误\n\n"
+        "用法:\n"
+        "  /schedule             查看\n"
+        "  /schedule 23:00 07:00 设置\n"
+        "  /schedule off         禁用\n"
+        "  /schedule on          启用",
+        chat_id
+    )
 
 # ================== Telegram 通知 ==================
 def send_tg_message(message, chat_id=None):
@@ -514,6 +681,8 @@ def tg_command_listener():
                         "自动保活已恢复。实例若被关机将自动拉起。",
                         chat_id
                     )
+                elif text == '/schedule' or text.startswith('/schedule '):
+                    handle_schedule_command(text, chat_id)
                 elif text == '/status':
                     details = get_instance_details()
                     traffic = query_cdt_traffic()
@@ -585,6 +754,7 @@ def tg_command_listener():
                         "/stop - 手动关机（自动进入维护模式）\n"
                         "/pause - 进入维护模式（不自动开机）\n"
                         "/resume - 退出维护模式\n"
+                        "/schedule - 查看/设置定时开关机\n"
                         "/status - 查询实例状态+CDT\n"
                         "/cdt - 仅查询CDT流量\n"
                         "/help - 显示帮助"
