@@ -130,11 +130,40 @@ curl http://localhost:8080/health              # 健康检查
 | `/stop` | 手动关机（自动进入维护模式） |
 | `/pause` | 进入维护模式（不自动开机） |
 | `/resume` | 退出维护模式 |
+| `/schedule` | 查看定时开关机配置 |
+| `/schedule 23:00 07:00` | 设置关机 23:00、开机 07:00（自动启用） |
+| `/schedule off` | 禁用定时（不改变实例当前状态） |
+| `/schedule on` | 启用定时（需先设置过时间） |
 | `/status` | 查询实例状态 + CDT 流量 |
 | `/cdt` | 仅查询当前 CDT 流量 |
 | `/help` | 显示帮助 |
 
 > **维护模式说明**：进入维护模式后，实例即使被关机（手动或系统回收）也不会被自动拉起，适合临时省钱。发送 `/resume` 或 `/start` 可退出。
+
+### 定时开关机
+
+通过 Telegram 设置每日定时开关机：
+
+```
+/schedule 23:00 07:00     # 23:00 关机，次日 07:00 开机
+/schedule                  # 查看当前配置和下次触发时间
+/schedule off              # 禁用定时
+/schedule on               # 重新启用
+```
+
+**特性**：
+
+- 关机时自动进入维护模式，不会立即被 Webhook 拉起
+- 开机时自动退出维护模式，并执行 CDT 安全阈值检查
+- 使用 VPS 本地时区（可用 `timedatectl` 确认）
+- 调度器每分钟检查一次，触发误差 <1 秒
+
+**边界行为**：
+
+- `/schedule off` 仅禁用定时，**不改变**当前实例状态和维护模式
+- 在计划停机时段内手动 `/start` 会立即开机并退出维护模式，直到明天的 `stop_time` 才重新关机
+- 定时开机时若 CDT 超限，实例保持关闭并收到 Telegram 告警
+- 调度器重启后，当日已执行的动作会因"实例已处于目标状态"而幂等安全
 
 ---
 
@@ -145,6 +174,7 @@ journalctl -u ecs-webhook -f        # Webhook 服务（Nginx → Gunicorn）
 journalctl -u ecs-tgbot -f          # Telegram 监听服务
 journalctl -u cdt-stop.service -f   # CDT 超额关机执行日志
 journalctl -u cdt-report.service -f # 每日报告执行日志
+journalctl -u ecs-scheduler -f      # 定时调度器
 ```
 
 Nginx 日志：
@@ -220,8 +250,10 @@ systemctl restart ecs-webhook ecs-tgbot
 ```
 /opt/ecs-auto/
 ├── config.json            # 配置文件
+├── schedule.json          # 定时开关机配置
 ├── ecs_webhook.py         # 主程序（Flask 应用 + 业务逻辑）
 ├── tg_bot.py              # Telegram 独立监听服务入口
+├── scheduler.py           # 定时调度器
 ├── cdt_auto_stop.py       # CDT 超额关机
 └── cdt_daily_report.py    # 每日报告
 
@@ -231,7 +263,8 @@ systemctl restart ecs-webhook ecs-tgbot
 ├── cdt-stop.service       # CDT 检查（oneshot）
 ├── cdt-stop.timer         # 每 20-40 分钟触发
 ├── cdt-report.service     # 每日报告
-└── cdt-report.timer       # 每天 09:00 / 20:00 触发
+├── cdt-report.timer       # 每天 09:00 / 20:00 触发
+└── ecs-scheduler.service  # 定时调度服务
 
 /etc/nginx/conf.d/
 └── ecs-webhook.conf       # Nginx 反向代理配置
