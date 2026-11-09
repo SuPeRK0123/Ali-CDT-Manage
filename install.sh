@@ -91,7 +91,7 @@ do_uninstall() {
 
     echo -e "${YELLOW}是否删除配置和数据目录 $INSTALL_DIR？(y/N)${NC}"
     read -r DEL_DATA || true
-        if [[ "$DEL_DATA" =~ ^[Yy]$ ]]; then
+    if [[ "$DEL_DATA" =~ ^[Yy]$ ]]; then
         rm -rf "$INSTALL_DIR"
         rm -f "$SOCKET_PATH" /var/run/cdt_history.json /var/run/ecs-auto.lock /var/run/ecs-auto.paused
         echo -e "${GREEN}数据已删除${NC}"
@@ -143,8 +143,8 @@ if [[ -f "$INSTALL_DIR/config.json" ]]; then
         exit 0
     fi
     echo -e "${YELLOW}>>> 停止旧服务，避免端口/Socket 冲突...${NC}"
-    systemctl stop ecs-webhook ecs-tgbot 2>/dev/null || true
-    systemctl disable ecs-webhook ecs-tgbot 2>/dev/null || true
+    systemctl stop ecs-webhook ecs-tgbot ecs-scheduler 2>/dev/null || true
+    systemctl disable ecs-webhook ecs-tgbot ecs-scheduler 2>/dev/null || true
     rm -f "$SOCKET_PATH"
 fi
 
