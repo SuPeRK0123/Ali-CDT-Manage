@@ -28,7 +28,8 @@
 └───────────────────────┘
 
 独立服务：
-  ecs-tgbot.service → tg_bot.py → Telegram 长轮询
+  ecs-tgbot.service    → tg_bot.py       → Telegram 长轮询
+  ecs-scheduler.service → scheduler.py   → 定时调用 /api/start 和 /api/stop
 ```
 
 **各组件职责**：
@@ -39,6 +40,7 @@
 | **Gunicorn (gthread)** | 管理 Flask 应用进程；多线程 worker 抵御慢连接攻击 |
 | **Flask** | 业务逻辑（事件解析、ECS API 调用、路由） |
 | **ecs-tgbot 独立进程** | Telegram 长轮询，不受 Webhook 服务重启影响 |
+| **ecs-scheduler 独立进程** | 读取 `schedule.json`，每分钟检查是否到点，调用本地 API |
 
 ---
 
@@ -240,7 +242,7 @@ sudo ./install.sh --uninstall
 修改后重启相关服务生效：
 
 ```bash
-systemctl restart ecs-webhook ecs-tgbot
+systemctl restart ecs-webhook ecs-tgbot ecs-scheduler
 ```
 
 ---
