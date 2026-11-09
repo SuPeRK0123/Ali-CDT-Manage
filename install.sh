@@ -15,10 +15,11 @@ LOCK_FILE="/var/run/ecs-auto.lock"
 SOCKET_PATH="/run/ecs-webhook.sock"
 NGINX_CONF="/etc/nginx/conf.d/ecs-webhook.conf"
 GH_BASE="https://raw.githubusercontent.com/SuPeRK0123/Ali-CDT-Manage/refs/heads/main"
-PY_FILES=("ecs_webhook.py" "cdt_auto_stop.py" "cdt_daily_report.py" "tg_bot.py")
+PY_FILES=("ecs_webhook.py" "cdt_auto_stop.py" "cdt_daily_report.py" "tg_bot.py" "scheduler.py")
 SERVICE_FILES=(
     "/etc/systemd/system/ecs-webhook.service"
     "/etc/systemd/system/ecs-tgbot.service"
+    "/etc/systemd/system/ecs-scheduler.service"
     "/etc/systemd/system/cdt-stop.service"
     "/etc/systemd/system/cdt-stop.timer"
     "/etc/systemd/system/cdt-report.service"
@@ -73,8 +74,8 @@ retry_curl() {
 do_uninstall() {
     echo -e "${YELLOW}>>> 卸载 Ali-CDT-Manage...${NC}"
 
-    systemctl stop ecs-webhook ecs-tgbot cdt-stop.timer cdt-report.timer 2>/dev/null || true
-    systemctl disable ecs-webhook ecs-tgbot cdt-stop.timer cdt-report.timer 2>/dev/null || true
+    systemctl stop ecs-webhook ecs-tgbot ecs-scheduler cdt-stop.timer cdt-report.timer 2>/dev/null || true
+    systemctl disable ecs-webhook ecs-tgbot ecs-scheduler cdt-stop.timer cdt-report.timer 2>/dev/null || true
 
     for f in "${SERVICE_FILES[@]}"; do
         rm -f "$f"
@@ -221,6 +222,17 @@ cat > "$INSTALL_DIR/config.json" <<EOF
 }
 EOF
 chmod 600 "$INSTALL_DIR/config.json"
+# 创建默认 schedule.json（仅当不存在时，保留用户已设置的定时配置）
+if [[ ! -f "$INSTALL_DIR/schedule.json" ]]; then
+    cat > "$INSTALL_DIR/schedule.json" <<EOF
+{
+    "enabled": false,
+    "stop_time": null,
+    "start_time": null
+}
+EOF
+    chmod 600 "$INSTALL_DIR/schedule.json"
+fi
 
 # ==================== 部署脚本文件 ====================
 echo -e "${YELLOW}>>> 部署脚本文件...${NC}"
@@ -288,6 +300,27 @@ User=root
 Group=root
 WorkingDirectory=$INSTALL_DIR
 ExecStart=/usr/bin/python3 $INSTALL_DIR/tg_bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 定时调度服务
+cat > /etc/systemd/system/ecs-scheduler.service <<EOF
+[Unit]
+Description=ECS Schedule Trigger
+After=network.target ecs-webhook.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=$INSTALL_DIR
+ExecStart=/usr/bin/python3 $INSTALL_DIR/scheduler.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -414,8 +447,8 @@ else
 fi
 
 # 启动业务服务
-systemctl enable ecs-webhook ecs-tgbot cdt-stop.timer cdt-report.timer
-systemctl restart ecs-webhook ecs-tgbot
+systemctl enable ecs-webhook ecs-tgbot ecs-scheduler cdt-stop.timer cdt-report.timer
+systemctl restart ecs-webhook ecs-tgbot ecs-scheduler
 systemctl start cdt-stop.timer cdt-report.timer
 
 # ==================== 完成提示 ====================
@@ -433,6 +466,7 @@ echo -e ""
 echo -e "查看日志："
 echo -e "  journalctl -u ecs-webhook -f   # Webhook 服务"
 echo -e "  journalctl -u ecs-tgbot -f     # Telegram 监听"
+echo -e "  journalctl -u ecs-scheduler -f # 定时调度器"
 echo -e ""
 echo -e "手动控制 API（本地）："
 echo -e "  开机：curl -X POST http://localhost:${WEBHOOK_PORT}/api/start"
